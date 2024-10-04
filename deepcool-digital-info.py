@@ -63,7 +63,7 @@ SENSOR = args.sensor
 SENSOR_INDEX = args.sensor_index
 CUR_DEVICE = args.device
 TST_MODE = args.test
-#CUSTOM_GET_TEMP= args.alttemp
+CUSTOM_GET_TEMP= args.alttemp
 #print(CUSTOM_GET_TEMP)
 
 if args.json_devices is not None:
