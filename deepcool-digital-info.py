@@ -1,15 +1,17 @@
 #!/bin/python3
-
 import sys
 import time
 import hid
 import psutil
 import argparse
+import threading
+import subprocess,json
 
-CUR_DEVICE = "CUSTOM"
-SENSOR = 'k10temp'
-SENSOR_INDEX = 0
+CUR_DEVICE = "AK400"
+SENSOR = 'k10temp-pci-00c3'
+SENSOR_INDEX = "Tctl"
 INTERVAL = 1
+CUSTOM_GET_TEMP = True
 
 
 class DeviceInfo:
@@ -39,7 +41,7 @@ parser.add_argument('-i', '--interval', type=int, nargs='?', help='display refre
 parser.add_argument('-j', '--json-devices', nargs='?', help='path to the device configuration file in the form of a '
                                                             'json-file', default=None)
 parser.add_argument('-s', '--sensor', default=SENSOR, nargs='?', type=str)
-parser.add_argument('-z', '--sensor-index', default=SENSOR_INDEX, nargs='?', type=int)
+parser.add_argument('-z', '--sensor-index', default=SENSOR_INDEX, nargs='?', type=str)
 parser.add_argument('-m', '--simple', action='store_true',
                     help="specify if using simple data sending mode (if "
                          "your device is on the list, don't worry about "
@@ -52,6 +54,8 @@ parser.add_argument('-v', '--vendor', type=lambda x: int(x, 0), nargs='?',
 parser.add_argument('-p', '--product', type=lambda x: int(x, 0), nargs='?',
                     help="provide a specific PRODUCT_ID (if your device is listed, "
                          "don't worry about it)", default=None)
+parser.add_argument('-a', '--alttemp', action='store_true',
+                    help="alternative way to get temperature if psutil is too slow")
 
 args = parser.parse_args()
 INTERVAL = args.interval
@@ -59,6 +63,8 @@ SENSOR = args.sensor
 SENSOR_INDEX = args.sensor_index
 CUR_DEVICE = args.device
 TST_MODE = args.test
+#CUSTOM_GET_TEMP= args.alttemp
+#print(CUSTOM_GET_TEMP)
 
 if args.json_devices is not None:
     custom_device = DEVICES["CUSTOM"]
@@ -156,30 +162,47 @@ def get_cpu_temperature(label="CPU"):
     return 0
 
 
-def get_temperature(is_test: bool = False):
+def get_temperature(is_test: bool = False,custom_get: bool = False):
     if is_test:
         return randint(45, 95)
 
-    try:
-        temp_sensor = round(psutil.sensors_temperatures()[SENSOR][SENSOR_INDEX].current)
-    except KeyError:
-        temp_sensor = get_cpu_temperature()
+    if(custom_get):
+        result = subprocess.run(['sensors', '-j'], capture_output=True, text=True)
+        sensor_data = json.loads(result.stdout)
+        temp_sensor =  round(sensor_data[SENSOR][SENSOR_INDEX]["temp1_input"])
+    else:
+        try:
+            temp_sensor = round(psutil.sensors_temperatures()[SENSOR][SENSOR_INDEX].current)
+        except KeyError:
+            temp_sensor = get_cpu_temperature()
     return temp_sensor
 
-
+#sensors -j
 def get_usage(is_test: bool = False):
     if is_test:
         return randint(0, 100)
 
     return round(psutil.cpu_percent())
 
+def thread_get_temp():
+    global temp
+    global Running
+    while Running:
+        temp = get_data_complex(value=get_temperature(TST_MODE,CUSTOM_GET_TEMP), mode='temp')
+        time.sleep(2)
+
+Running=True
 
 try:
+    temp = get_data_complex(value=get_temperature(TST_MODE), mode='temp')
     hidDevice = hid.device()
+    print(CUR_DEVICE)
     hidDevice.open(DEVICES[CUR_DEVICE].VENDOR_ID, DEVICES[CUR_DEVICE].PRODUCT_ID)
     hidDevice.set_nonblocking(1)
     if not DEVICES[CUR_DEVICE].SIMPLE_MODE:
         hidDevice.write(get_data_complex(mode="start"))
+    if not(TST_MODE):
+        threading.Thread(target=thread_get_temp).start()
     while True:
         if DEVICES[CUR_DEVICE].SIMPLE_MODE:
             data = get_data_simple(usage=get_usage(TST_MODE), temp_c=get_temperature(TST_MODE))
@@ -188,12 +211,15 @@ try:
             continue
 
         hidDevice.set_nonblocking(1)
-        temp = get_data_complex(value=get_temperature(TST_MODE), mode='temp')
-        hidDevice.write(temp)
-        time.sleep(INTERVAL)
-        utils = get_data_complex(value=get_usage(TST_MODE), mode='util')
-        hidDevice.write(utils)
-        time.sleep(INTERVAL)
+        for x in range(10):
+            if (TST_MODE):
+                temp = get_data_complex(value=get_temperature(TST_MODE), mode='temp')
+            hidDevice.write(temp)
+            time.sleep(INTERVAL)
+        for x in range(10):
+            utils = get_data_complex(value=get_usage(TST_MODE), mode='util')
+            hidDevice.write(utils)
+            time.sleep(INTERVAL)
 except IOError as ex:
     print(ex)
     print("Failed to open device for writing. Either you are using the wrong device (incorrect VENDOR_ID/PRODUCT_ID), "
@@ -201,5 +227,6 @@ except IOError as ex:
 except KeyboardInterrupt:
     print("\nScript terminated by user.")
 finally:
+    Running=False
     if 'hidDevice' in locals():
         hidDevice.close()
