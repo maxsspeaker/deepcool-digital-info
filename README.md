@@ -19,9 +19,18 @@ The number of supported devices is expanding with the help of the community, so 
 It is not recommended to use PIP as an installer of these dependencies, since here you can miss the user access
 (for example, the superuser from whom this service will be launched may not have access to them).
 For this reason, it is better to follow the installation path from your distribution's repository. For example,
-for Fedora it looks something like this:
+
+### Debian (Ubuntu)
 ~~~shell
-sudo dnf install python-json5 python-hidapi python-psutil
+sudo apt install python-json5 python-hidapi python-psutil lm_sensors
+~~~
+### Fedora
+~~~shell
+sudo dnf install python-json5 python-hidapi python-psutil lm_sensors
+~~~
+### Arch
+~~~shell
+sudo pacman -S python-json5 python-hidapi python-psutil lm_sensors
 ~~~
 
 ## Configuration and Install
